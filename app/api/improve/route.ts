@@ -1,7 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY!);
 
 const difficultyPrompts = {
   small: "with many small detailed areas and fine intricate patterns to color",
@@ -13,48 +10,21 @@ export async function POST(req: NextRequest) {
   try {
     const { currentImage, improvePrompt, difficulty } = await req.json();
 
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash-image",
-      generationConfig: {
-        responseModalities: ["IMAGE", "TEXT"],
-      } as any,
-    });
+    // Use Pollinations for improve (text-to-image, regenerates based on prompt)
+    const fullPrompt = `Black and white coloring page for children: ${improvePrompt}. Pure black outlines on white background only, NO gray shading, NO gradients, NO color fills, thick clear bold outlines suitable for coloring, cartoon illustration style for kids, ${difficultyPrompts[difficulty as keyof typeof difficultyPrompts] || difficultyPrompts.medium}`;
 
-    const prompt = `This is a black and white coloring page. Please modify it based on this instruction: "${improvePrompt}"
+    const encodedPrompt = encodeURIComponent(fullPrompt);
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=768&nologo=true&seed=${Date.now()}`;
 
-Keep the same coloring page style:
-- Pure black outlines on white background only
-- No gray shading, no gradients, no color fills
-- Thick clear bold outlines suitable for coloring
-- Cartoon/illustration style for kids
-- ${difficultyPrompts[difficulty as keyof typeof difficultyPrompts] || difficultyPrompts.medium}
-- Preserve the overall composition but apply the requested changes`;
-
-    const result = await model.generateContent([
-      { text: prompt },
-      { inlineData: { mimeType: "image/png", data: currentImage } },
-    ]);
-
-    const response = result.response;
-    const candidates = response.candidates;
-
-    if (!candidates || candidates.length === 0) {
-      throw new Error("לא התקבלה תמונה מה-AI");
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      throw new Error("שגיאה בשיפור התמונה");
     }
 
-    let imageData: string | null = null;
-    for (const part of candidates[0].content.parts) {
-      if (part.inlineData) {
-        imageData = part.inlineData.data;
-        break;
-      }
-    }
+    const arrayBuffer = await response.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString("base64");
 
-    if (!imageData) {
-      throw new Error("לא נמצאה תמונה בתשובה");
-    }
-
-    return NextResponse.json({ image: imageData });
+    return NextResponse.json({ image: base64 });
   } catch (error: any) {
     console.error("Improve error:", error);
     return NextResponse.json(

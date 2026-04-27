@@ -1,7 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY!);
 
 const difficultyPrompts = {
   small: "with many small detailed areas and fine intricate patterns to color",
@@ -14,27 +11,66 @@ const orientationPrompts = {
   portrait: "in portrait/vertical orientation (taller than wide)",
 };
 
+const orientationSizes = {
+  landscape: { width: 1024, height: 768 },
+  portrait: { width: 768, height: 1024 },
+};
+
 export async function POST(req: NextRequest) {
   try {
     const { prompt, orientation, difficulty, uploadedImage } = await req.json();
 
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash-image",
-      generationConfig: {
-        responseModalities: ["IMAGE", "TEXT"],
-      } as any,
-    });
-
-    let fullPrompt: string;
-    const parts: any[] = [];
-
     if (uploadedImage) {
-      // Image-to-coloring-page
-      const base64Data = uploadedImage.replace(/^data:image\/\w+;base64,/, "");
-      const mimeMatch = uploadedImage.match(/^data:(image\/\w+);base64,/);
-      const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+      // Image-to-coloring-page requires Gemini
+      return await generateWithGemini(prompt, orientation, difficulty, uploadedImage);
+    }
 
-      fullPrompt = `Convert this image into a black and white coloring page for children.
+    // Text-to-coloring-page via Pollinations (free, no API key)
+    const fullPrompt = `Black and white coloring page for children showing: ${prompt}. Pure black outlines on completely white background, NO gray shading, NO gradients, NO color fills, thick clear bold outlines suitable for coloring, cute friendly cartoon illustration style for kids aged 3-10, ${difficultyPrompts[difficulty as keyof typeof difficultyPrompts] || difficultyPrompts.medium}, ${orientationPrompts[orientation as keyof typeof orientationPrompts] || orientationPrompts.landscape}, the image should fill the page and be centered`;
+
+    const size = orientationSizes[orientation as keyof typeof orientationSizes] || orientationSizes.landscape;
+    const encodedPrompt = encodeURIComponent(fullPrompt);
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${size.width}&height=${size.height}&nologo=true&seed=${Date.now()}`;
+
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      throw new Error("שגיאה ביצירת התמונה");
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString("base64");
+
+    return NextResponse.json({ image: base64 });
+  } catch (error: any) {
+    console.error("Generate error:", error);
+    return NextResponse.json(
+      { error: error.message || "שגיאה ביצירת התמונה" },
+      { status: 500 }
+    );
+  }
+}
+
+async function generateWithGemini(
+  prompt: string,
+  orientation: string,
+  difficulty: string,
+  uploadedImage: string
+) {
+  const { GoogleGenerativeAI } = await import("@google/generative-ai");
+  const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || "");
+
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.5-flash-image",
+    generationConfig: {
+      responseModalities: ["IMAGE", "TEXT"],
+    } as any,
+  });
+
+  const base64Data = uploadedImage.replace(/^data:image\/\w+;base64,/, "");
+  const mimeMatch = uploadedImage.match(/^data:(image\/\w+);base64,/);
+  const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+
+  const fullPrompt = `Convert this image into a black and white coloring page for children.
 Style requirements:
 - Pure black outlines on white background only
 - No gray shading, no gradients, no fills
@@ -45,52 +81,27 @@ Style requirements:
 - Keep the main subject and composition of the original image
 ${prompt ? `- Additional instruction: ${prompt}` : ""}`;
 
-      parts.push({ text: fullPrompt });
-      parts.push({ inlineData: { mimeType, data: base64Data } });
-    } else {
-      // Text-to-coloring-page
-      fullPrompt = `Create a black and white coloring page for children showing: ${prompt}
+  const result = await model.generateContent([
+    { text: fullPrompt },
+    { inlineData: { mimeType, data: base64Data } },
+  ]);
 
-Style requirements:
-- Pure black outlines on completely white background
-- NO gray shading, NO gradients, NO color fills whatsoever
-- Thick clear bold outlines suitable for coloring
-- Cute friendly cartoon/illustration style for kids aged 3-10
-- ${difficultyPrompts[difficulty as keyof typeof difficultyPrompts] || difficultyPrompts.medium}
-- ${orientationPrompts[orientation as keyof typeof orientationPrompts] || orientationPrompts.landscape}
-- The image should fill the page and be centered
-- Add fun decorative elements like stars, hearts, or flowers if space allows`;
-
-      parts.push({ text: fullPrompt });
-    }
-
-    const result = await model.generateContent(parts);
-    const response = result.response;
-
-    // Extract image from response
-    const candidates = response.candidates;
-    if (!candidates || candidates.length === 0) {
-      throw new Error("לא התקבלה תמונה מה-AI");
-    }
-
-    let imageData: string | null = null;
-    for (const part of candidates[0].content.parts) {
-      if (part.inlineData) {
-        imageData = part.inlineData.data;
-        break;
-      }
-    }
-
-    if (!imageData) {
-      throw new Error("לא נמצאה תמונה בתשובה");
-    }
-
-    return NextResponse.json({ image: imageData });
-  } catch (error: any) {
-    console.error("Generate error:", error);
-    return NextResponse.json(
-      { error: error.message || "שגיאה ביצירת התמונה" },
-      { status: 500 }
-    );
+  const candidates = result.response.candidates;
+  if (!candidates || candidates.length === 0) {
+    throw new Error("לא התקבלה תמונה מה-AI");
   }
+
+  let imageData: string | null = null;
+  for (const part of candidates[0].content.parts) {
+    if (part.inlineData) {
+      imageData = part.inlineData.data;
+      break;
+    }
+  }
+
+  if (!imageData) {
+    throw new Error("לא נמצאה תמונה בתשובה");
+  }
+
+  return NextResponse.json({ image: imageData });
 }
