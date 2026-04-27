@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     const { prompt, orientation, difficulty, uploadedImage } = await req.json();
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash-image",
       generationConfig: {
         responseModalities: ["IMAGE", "TEXT"],
       } as any,
