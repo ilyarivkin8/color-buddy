@@ -21,8 +21,8 @@ export async function POST(req: NextRequest) {
     const model = genAI.getGenerativeModel({
       model: "gemini-2.0-flash-exp",
       generationConfig: {
-        responseModalities: ["IMAGE", "TEXT"] as any,
-      },
+        responseModalities: ["IMAGE", "TEXT"],
+      } as any,
     });
 
     let fullPrompt: string;
