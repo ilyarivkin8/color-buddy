@@ -16,8 +16,8 @@ export async function POST(req: NextRequest) {
     const model = genAI.getGenerativeModel({
       model: "gemini-2.0-flash-exp",
       generationConfig: {
-        responseModalities: ["IMAGE", "TEXT"] as any,
-      },
+        responseModalities: ["IMAGE", "TEXT"],
+      } as any,
     });
 
     const prompt = `This is a black and white coloring page. Please modify it based on this instruction: "${improvePrompt}"
